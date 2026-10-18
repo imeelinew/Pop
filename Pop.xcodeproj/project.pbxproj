@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		027A22A382753479A63DD8B9 /* Pop.icon in Resources */ = {isa = PBXBuildFile; fileRef = EA126E5E297DDDB0DA212463 /* Pop.icon */; };
 		72DF4923E7BEC4A9981F51D0 /* SelectionReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472C81AC359A4FFF05227AA6 /* SelectionReader.swift */; };
 		89452C28146AB2986B1C2B12 /* GlobalShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F3F745AD456B422BC35687 /* GlobalShortcut.swift */; };
 		8F10CD2DAF9DC1672131487F /* Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B14BC2D4014D5B74E694636 /* Configuration.swift */; };
@@ -29,6 +30,7 @@
 		767E96BD1B06017010F01F48 /* config.example.toml */ = {isa = PBXFileReference; path = config.example.toml; sourceTree = "<group>"; };
 		935A37C49982DC7A0651FAB2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AFB0EAB45F0143A9C4892264 /* PopoverController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverController.swift; sourceTree = "<group>"; };
+		EA126E5E297DDDB0DA212463 /* Pop.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Pop.icon; sourceTree = "<group>"; };
 		F2ADA62C7BBAB7DCA4D7A425 /* TranslationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationView.swift; sourceTree = "<group>"; };
 		FC744378E318A7AC47457F48 /* Pop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pop.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -70,6 +72,7 @@
 				36F3F745AD456B422BC35687 /* GlobalShortcut.swift */,
 				935A37C49982DC7A0651FAB2 /* Info.plist */,
 				21F9D814F88A1B84BF632538 /* main.swift */,
+				EA126E5E297DDDB0DA212463 /* Pop.icon */,
 				AFB0EAB45F0143A9C4892264 /* PopoverController.swift */,
 				472C81AC359A4FFF05227AA6 /* SelectionReader.swift */,
 				384C15CCC6383BA7ADF57A0C /* TranslationClient.swift */,
@@ -142,6 +145,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				027A22A382753479A63DD8B9 /* Pop.icon in Resources */,
 				EE4B2E522766FB837959DAC1 /* config.example.toml in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -170,7 +174,7 @@
 		1EFD55F21916A9F85639981A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Pop;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
@@ -189,7 +193,7 @@
 		61FD2420462FFA4D5C905192 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Pop;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;

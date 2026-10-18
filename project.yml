@@ -22,18 +22,25 @@ targets:
     platform: macOS
     sources:
       - path: Pop
+        excludes:
+          - Pop.icon
+      - path: Pop/Pop.icon
+        type: file
+        buildPhase: resources
     dependencies:
       - package: TOMLDecoder
     info:
       path: Pop/Info.plist
       properties:
         CFBundleDisplayName: Pop
+        CFBundleIconName: Pop
         LSUIElement: true
         NSPrincipalClass: NSApplication
         NSAccessibilityUsageDescription: Read selected text to translate it when you press the shortcut.
     settings:
       base:
         PRODUCT_NAME: Pop
+        ASSETCATALOG_COMPILER_APPICON_NAME: Pop
         MARKETING_VERSION: 1.0
         CURRENT_PROJECT_VERSION: 1
         ENABLE_APP_SANDBOX: NO

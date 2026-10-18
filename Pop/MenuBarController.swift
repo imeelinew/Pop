@@ -17,7 +17,7 @@ final class MenuBarController: NSObject {
         let menu = NSMenu()
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
-        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        settings.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
         settings.preferredImageVisibility = .visible
         menu.addItem(settings)
 

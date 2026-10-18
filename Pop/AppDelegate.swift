@@ -4,6 +4,7 @@ import OSLog
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcut = GlobalShortcut()
+    private let menuBar = MenuBarController()
     private let popover = PopoverController()
     private let state = TranslationState()
     private let logger = Logger(subsystem: "dev.eli.Pop", category: "App")
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        menuBar.start()
         shortcut.onPress = { [weak self] in self?.trigger() }
         popover.onClose = { [weak self] in self?.cancel() }
         do { try Configuration.prepare() } catch {
@@ -43,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         task?.cancel()
         configurationTimer?.invalidate()
         shortcut.stop()
+        menuBar.stop()
         popover.close()
     }
 
@@ -92,10 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let issue = self.configurationIssue { throw PopError.message(issue) }
                 let configuration = try Configuration.load()
                 try Task.checkCancellation()
-                guard selected.text.count <= configuration.selection.max_characters else {
-                    throw PopError.message("Selection exceeds \(configuration.selection.max_characters) characters.")
+                guard selected.text.count <= TranslationClient.selectionLimit else {
+                    throw PopError.message("Selection exceeds \(TranslationClient.selectionLimit) characters.")
                 }
-                try await TranslationClient().translate(selected.text, configuration: configuration.llm) { [weak self] delta in
+                try await TranslationClient().translate(selected.text, configuration: configuration) { [weak self] delta in
                     guard let self, self.requestID == id else { return }
                     self.state.text += delta
                 }

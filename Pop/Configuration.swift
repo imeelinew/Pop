@@ -2,27 +2,15 @@ import Foundation
 import TOMLDecoder
 
 struct Configuration: Decodable, Sendable {
-    struct LLM: Decodable, Sendable {
-        var base_url: String
-        var api_key: String
-        var model: String
-        var system_prompt: String
-        var timeout_seconds: Double = 60
-        var extra_body: String = "{}"
-    }
-
     struct Shortcut: Decodable, Sendable {
         var key: String
         var modifiers: [String]
     }
 
-    struct Selection: Decodable, Sendable {
-        var max_characters: Int = 12000
-    }
-
-    var llm: LLM
+    var model: String
+    var api_key: String
+    var base_url: String
     var shortcut: Shortcut
-    var selection: Selection = Selection()
 
     static var fileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -38,8 +26,17 @@ struct Configuration: Decodable, Sendable {
                 throw PopError.message("Configuration template missing.")
             }
             try FileManager.default.copyItem(at: template, to: fileURL)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        } else {
+            let data = try Data(contentsOf: fileURL)
+            let decoder = TOMLDecoder()
+            if (try? decoder.decode(Configuration.self, from: data)) == nil,
+               let old = try? decoder.decode(LegacyConfiguration.self, from: data) {
+                let migrated = Configuration(model: old.llm.model, api_key: old.llm.api_key,
+                                             base_url: old.llm.base_url, shortcut: old.shortcut)
+                try migrated.contents().write(to: fileURL, atomically: true, encoding: .utf8)
+            }
         }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 
     static func load() throws -> Configuration {
@@ -49,23 +46,44 @@ struct Configuration: Decodable, Sendable {
         } catch {
             throw PopError.message("Invalid config.toml. Check its syntax and required fields.")
         }
-        guard let url = URL(string: result.llm.base_url),
+        guard let url = URL(string: result.base_url),
               ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
             throw PopError.message("Invalid API base URL.")
         }
-        guard !result.llm.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !result.llm.system_prompt.isEmpty,
-              (5...300).contains(result.llm.timeout_seconds),
-              (1...100000).contains(result.selection.max_characters) else {
-            throw PopError.message("Invalid model, prompt, timeout or selection limit.")
-        }
-        guard let extra = result.llm.extra_body.data(using: .utf8),
-              let fields = try? JSONSerialization.jsonObject(with: extra) as? [String: Any],
-              Set(fields.keys).isDisjoint(with: ["model", "messages", "stream"]) else {
-            throw PopError.message("extra_body must be a JSON object without model, messages or stream.")
+        guard !result.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PopError.message("Model is missing.")
         }
         return result
+    }
+
+    private func contents() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        func quoted(_ value: String) throws -> String {
+            String(decoding: try encoder.encode(value), as: UTF8.self)
+        }
+        let modifiers = try shortcut.modifiers.map { try quoted($0) }.joined(separator: ", ")
+        return """
+        model = \(try quoted(model))
+        api_key = \(try quoted(api_key))
+        base_url = \(try quoted(base_url))
+
+        [shortcut]
+        key = \(try quoted(shortcut.key))
+        modifiers = [\(modifiers)]
+
+        """
+    }
+
+    private struct LegacyConfiguration: Decodable {
+        struct LLM: Decodable {
+            var model: String
+            var api_key: String
+            var base_url: String
+        }
+        var llm: LLM
+        var shortcut: Shortcut
     }
 }
 

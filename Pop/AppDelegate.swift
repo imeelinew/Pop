@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var task: Task<Void, Never>?
     private var requestID = UUID()
     private var configurationTimer: Timer?
+    private var activationObserver: NSObjectProtocol?
     private var configDate: Date?
     private var configurationIssue: String?
     private var lastSelection: TextSelection?
@@ -38,12 +39,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.reloadIfChanged() }
         }
         if !SelectionReader.isTrusted { SelectionReader.requestPermission() }
+        SelectionReader.prepareBrowser(NSWorkspace.shared.frontmostApplication)
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                SelectionReader.prepareBrowser(NSWorkspace.shared.frontmostApplication)
+            }
+        }
         logger.notice("Pop ready; Accessibility=\(SelectionReader.isTrusted)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         task?.cancel()
         configurationTimer?.invalidate()
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
         shortcut.stop()
         menuBar.stop()
         popover.close()
@@ -70,11 +80,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func trigger() {
         logger.notice("Translation shortcut received")
-        if popover.isShown || task != nil {
+        if popover.isShown {
             popover.close()
             cancel()
             return
         }
+        // Ignore key repeat while waiting for the browser's selection to settle.
+        guard task == nil else { return }
         start(selection: nil)
     }
 
@@ -88,7 +100,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             defer { if self.requestID == id { self.task = nil } }
             do {
-                guard let selected = selection ?? SelectionReader.read() else { return }
+                let selected: TextSelection
+                if let selection { selected = selection }
+                else {
+                    guard let result = try await SelectionReader.read() else { return }
+                    selected = result
+                }
                 self.lastSelection = selected
                 self.show(bounds: selected.bounds)
                 self.reloadConfiguration()

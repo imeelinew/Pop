@@ -16,7 +16,22 @@ enum SelectionReader {
         AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
     }
 
-    static func read(application requestedApplication: NSRunningApplication? = nil) -> TextSelection? {
+    private static let chromiumBundles: Set<String> = [
+        "com.google.Chrome", "com.microsoft.edgemac", "company.thebrowser.Browser",
+        "company.thebrowser.dia", "com.brave.Browser", "com.openai.codex"
+    ]
+
+    static func prepareBrowser(_ application: NSRunningApplication?) {
+        guard isTrusted, let application,
+              chromiumBundles.contains(application.bundleIdentifier ?? "") else { return }
+        let app = AXUIElementCreateApplication(application.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        if attribute(app, "AXManualAccessibility") as? Bool != true {
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+    }
+
+    static func read(application requestedApplication: NSRunningApplication? = nil) async throws -> TextSelection? {
         guard isTrusted else {
             logger.notice("Selection blocked: Accessibility permission is not active")
             requestPermission()
@@ -24,15 +39,26 @@ enum SelectionReader {
         }
         guard let application = requestedApplication ?? NSWorkspace.shared.frontmostApplication,
               application.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+        prepareBrowser(application)
+        let browser = chromiumBundles.contains(application.bundleIdentifier ?? "") || application.bundleIdentifier == "com.apple.Safari"
+        let delays = browser ? [0, 80, 160, 260] : [0]
+        for (attempt, delay) in delays.enumerated() {
+            try Task.checkCancellation()
+            if delay > 0 { try await Task.sleep(for: .milliseconds(delay)) }
+            if requestedApplication == nil,
+               NSWorkspace.shared.frontmostApplication?.processIdentifier != application.processIdentifier { return nil }
+            if let selection = scan(application: application, budget: browser ? 0.35 : 1) {
+                logger.notice("Selection ready after \(attempt + 1) attempt(s)")
+                return selection
+            }
+        }
+        return nil
+    }
+
+    private static func scan(application: NSRunningApplication, budget: TimeInterval) -> TextSelection? {
         logger.notice("Reading selection from \(application.bundleIdentifier ?? "unknown", privacy: .public)")
         let app = AXUIElementCreateApplication(application.processIdentifier)
-        AXUIElementSetMessagingTimeout(app, 0.2)
-        // Chromium exposes its text accessibility tree only after accessibility is enabled.
-        if ["com.google.Chrome", "com.microsoft.edgemac", "company.thebrowser.Browser", "company.thebrowser.dia", "com.brave.Browser", "com.openai.codex"].contains(application.bundleIdentifier ?? "") {
-            let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-            let enhanced = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-            logger.notice("Browser accessibility activation: manual=\(manual.rawValue) enhanced=\(enhanced.rawValue)")
-        }
+        AXUIElementSetMessagingTimeout(app, 0.1)
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.2)
         var focused = elementAttribute(app, kAXFocusedUIElementAttribute)
@@ -41,29 +67,40 @@ enum SelectionReader {
             if AXUIElementGetPid(systemFocused, &pid) == .success, pid == application.processIdentifier { focused = systemFocused }
         }
         var queue: [AXUIElement] = []
+        var webScope: AXUIElement?
         if let focused {
             queue.append(focused)
             var element: AXUIElement? = focused
             for _ in 0..<8 {
                 guard let current = element else { break }
                 if let selection = selection(in: current) { return selection }
+                if attribute(current, kAXRoleAttribute) as? String == "AXWebArea" {
+                    webScope = current
+                    break
+                }
                 element = elementAttribute(current, kAXParentAttribute)
             }
         }
-        if let window = elementAttribute(app, kAXFocusedWindowAttribute) ?? elementAttribute(app, kAXMainWindowAttribute) {
+        if let webScope { queue = [webScope] }
+        else if let window = elementAttribute(app, kAXFocusedWindowAttribute) ?? elementAttribute(app, kAXMainWindowAttribute) {
             queue.append(window)
         }
         var index = 0
-        var visited = Set<CFHashCode>()
-        let deadline = Date().addingTimeInterval(1)
-        while index < queue.count && index < 600 && Date() < deadline {
+        var visited = Set<AXUIElement>()
+        let deadline = Date().addingTimeInterval(budget)
+        while index < queue.count && index < 1200 && Date() < deadline {
             let current = queue[index]
             index += 1
-            guard visited.insert(CFHash(current)).inserted else { continue }
-            if let selection = selection(in: current) { return selection }
-            if let children = attribute(current, kAXChildrenAttribute) as? [AXUIElement] {
-                queue.append(contentsOf: children.prefix(max(0, 600 - queue.count)))
+            guard visited.insert(current).inserted else { continue }
+            if attribute(current, kAXRoleAttribute) as? String == "AXWebArea" {
+                if let webScope {
+                    guard current == webScope else { continue }
+                } else { webScope = current }
             }
+            if let selection = selection(in: current) { return selection }
+            let children = attribute(current, kAXChildrenAttribute) as? [AXUIElement] ?? []
+            let contents = attribute(current, "AXContents") as? [AXUIElement] ?? []
+            queue.append(contentsOf: (contents + children).prefix(max(0, 1200 - queue.count)))
         }
         logger.notice("Selection scan ended: elements=\(index)")
         // Never copy an unverified selection: some editors copy the entire line at an empty caret.
@@ -108,6 +145,7 @@ enum SelectionReader {
             logger.notice("Nonempty range but text attributes are unavailable")
             return nil
         }
+        if let reconstructed = markerSelection(in: element, range: range, expectedText: text) { return reconstructed }
         let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
         func appKitRect(_ rect: CGRect) -> CGRect {
             CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
@@ -167,17 +205,37 @@ enum SelectionReader {
 
     // Chromium and WebKit expose document selections as opaque text markers,
     // rather than the CFRange used by NSTextView.
+    private static func parameter(_ element: AXUIElement, _ name: String, _ value: CFTypeRef) -> CFTypeRef? {
+        var result: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, name as CFString, value, &result) == .success else { return nil }
+        return result
+    }
+
     private static func markerSelection(in element: AXUIElement) -> TextSelection? {
         guard let marker = attribute(element, "AXSelectedTextMarkerRange") else { return nil }
-        var textValue: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(element, "AXStringForTextMarkerRange" as CFString, marker, &textValue) == .success,
-              let text = textValue as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        var boundsValue: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(element, "AXBoundsForTextMarkerRange" as CFString, marker, &boundsValue) == .success,
-              let boundsValue, CFGetTypeID(boundsValue) == AXValueGetTypeID() else { return nil }
+        return selection(in: element, marker: marker)
+    }
+
+    private static func markerSelection(in element: AXUIElement, range: CFRange, expectedText: String) -> TextSelection? {
+        // Browser CFRange geometry is unreliable. On a web area its offsets are
+        // document-relative, so rebuild fresh markers and verify the exact text.
+        guard attribute(element, kAXRoleAttribute) as? String == "AXWebArea",
+              let start = parameter(element, "AXTextMarkerForIndex", NSNumber(value: range.location)),
+              let end = parameter(element, "AXTextMarkerForIndex", NSNumber(value: range.location + range.length)),
+              let marker = parameter(element, "AXTextMarkerRangeForUnorderedTextMarkers", [start, end] as CFArray) else { return nil }
+        return selection(in: element, marker: marker, expectedText: expectedText)
+    }
+
+    private static func selection(in element: AXUIElement, marker: CFTypeRef, expectedText: String? = nil) -> TextSelection? {
+        guard let text = parameter(element, "AXStringForTextMarkerRange", marker) as? String,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              expectedText == nil || text == expectedText,
+              let boundsValue = parameter(element, "AXBoundsForTextMarkerRange", marker),
+              CFGetTypeID(boundsValue) == AXValueGetTypeID() else { return nil }
         var rect = CGRect.zero
         guard AXValueGetValue(unsafeDowncast(boundsValue, to: AXValue.self), .cgRect, &rect),
-              rect.width > 0, rect.height > 0, rect.minX.isFinite, rect.minY.isFinite else { return nil }
+              rect.width > 0, rect.height > 0, rect.minX.isFinite, rect.minY.isFinite,
+              rect.width.isFinite, rect.height.isFinite else { return nil }
         let primaryHeight = CGDisplayBounds(CGMainDisplayID()).height
         let screenRect = CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
         for screen in NSScreen.screens {
